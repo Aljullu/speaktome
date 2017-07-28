@@ -31,7 +31,7 @@ Data will be collected with Google Analytics and follow [Test Pilot standards](h
 - `cm5` - the elapsed time in ms waiting for a response from the speech-to-text engine.
 
 ### Custom Dimensions
-- `cd1` - the outcome of a session or attempt. One of `accepted`, `rejected`, and `aborted`.
+- `cd1` - the outcome of a session or attempt. One of `default accepted`,`accepted`, `rejected`, and `reset`.
 - `cd2` - the location from which a session is initiated. One of `google`, `duckduckgo`, `Yahoo`, `generic`.
 - `cd3` - the UI element from which the session was initiated. One of `button`, `context menu`, `keyboard`.
 - `cd4` - whether the accepted submission was modified before being submitted. One of `true`, `false`.
@@ -66,3 +66,10 @@ Triggered whenever an attempt is acted upon. Includes:
 - `cm5`
 - `cd1` (for this attempt)
 - `cd5`
+
+## Additional Collection
+The uploaded voice samples and the JSON response containing the suggestions are
+saved together and identified by a random UUID.  We do not collect any
+identifying information or the selected search suggestion.  This information is
+used to improve the voice recognition software and is kept as long as it is
+useful for that purpose.

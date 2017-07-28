@@ -2,7 +2,7 @@
   "name": "speak-to-me",
   "id": "speaktome@mozilla.com",
   "description": "This is a simple WebExtension that adds support to use Speech To Text as an input method in web pages.",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "author": {
     "name": "Andre Natal & Fabrice Desré",
     "url": "https://github.com/mozilla/speaktome"
@@ -18,7 +18,8 @@
     "web-ext": "1.10.0"
   },
   "dependencies": {
-    "testpilot-ga": "^0.2.1"
+    "testpilot-ga": "latest",
+    "dompurify": "0.9.0"
   },
   "homepage": "https://github.com/mozilla/speaktome#readme",
   "keywords": [],
@@ -29,12 +30,12 @@
   },
   "scripts": {
     "build": "web-ext build -s extension --overwrite-dest",
-    "format": "prettier 'extension/!(webrtc_vad).{js,css}' --tab-width=4 --write",
+    "format": "prettier 'extension/!(bodymovin,webrtc_vad).{js,css}' --tab-width=4 --write",
     "lint": "npm-run-all lint:*",
-    "lint:extension": "web-ext lint -s extension --ignore-files webrtc_vad.js --self-hosted",
+    "lint:extension": "web-ext lint -s extension --ignore-files bodymovin.js webrtc_vad.js --self-hosted",
     "lint:js": "eslint extension",
     "once": "web-ext run -s extension",
     "package": "npm run build && mv web-ext-artifacts/*.zip addon.xpi",
-    "postinstall": "cp node_modules/testpilot-ga/dist/index.js extension/testpilot-qa.js"
+    "postinstall": "cp node_modules/testpilot-ga/dist/index.js extension/testpilot-ga.js && cp node_modules/dompurify/dist/purify.min.js extension/purify.min.js"
   }
 }

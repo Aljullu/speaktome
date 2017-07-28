@@ -19,7 +19,7 @@
     const DONE_ANIMATION = browser.extension.getURL("Done.json");
     const SPINNING_ANIMATION = browser.extension.getURL("Spinning.json");
     const START_ANIMATION = browser.extension.getURL("Start.json");
-
+    const ERROR_ANIMATION = browser.extension.getURL("Error.json");
 
     const getSTMAnchors = documentDomain => {
         switch (documentDomain) {
@@ -50,6 +50,8 @@
                     anchor: "uh-search-form"
                 };
             case "search.yahoo.com":
+            case "ca.search.yahoo.com":
+            case "uk.search.yahoo.com":
                 return {
                     input: "yschsp",
                     anchor: "sf"
@@ -81,7 +83,7 @@
     // When Selecting, this markup is passed in
     const SELECTION_MARKUP = `<form id="stm-selection-wrapper">
             <div id="stm-list-wrapper">
-                <input id="stm-input" type="text" />
+                <input id="stm-input" type="text" autocomplete="off" />
                 <div id="stm-list"></div>
             </div>
             <button id="stm-reset-button" title="Reset" type="button"></button>
@@ -112,6 +114,7 @@
             console.log(`SpeakToMePopup hide`);
             this.popup.classList.add("stm-drop-out");
             this.icon.classList.remove("stm-hidden");
+            this.icon.disabled = false;
 
             setTimeout(() => {
                 this.popup.classList.remove("stm-drop-out");
@@ -166,16 +169,20 @@
                     data.forEach((item, index) => {
                         if (index === 0) {
                             firstChoice = item;
-                        } else {
-                        html += `<li role="button" tabindex="0">${item.text}</li>`;
+                        } else if(index < 5) {
+                            let confidence = DOMPurify.sanitize(item.confidence);
+                            let text = DOMPurify.sanitize(item.text);
+                            html += `<li idx_suggestion="${index}" confidence="${confidence}" role="button" tabindex="0">${text}</li>`;
                         }
                     });
                     html += "</ul>";
                     list.innerHTML = html;
                 }
 
-                input.value = firstChoice.text;
+                input.confidence = DOMPurify.sanitize(firstChoice.confidence);
+                input.value = DOMPurify.sanitize(firstChoice.text);
                 input.size = input.value.length;
+                input.idx_suggestion = 0;
 
                 if (list) {
                     list.style.width = `${input.offsetWidth}px`;
@@ -183,19 +190,45 @@
 
                 input.focus();
 
+                input.addEventListener("keypress", function _expand_input(e) {
+                    // e.preventDefault();
+                    if(e.keyCode === 13) {
+                        e.preventDefault();
+                        list.classList.add('close');
+                        resolve(input);
+                    }
+                    else if(e.keyCode === 8) {
+                        input.size--;
+                        list.style.width = `${input.offsetWidth}px`;
+                    }
+                    else if(e.keyCode < 37 || e.keyCode > 40) {
+                        input.size = input.value.length;
+                        list.style.width = `${input.offsetWidth}px`;
+                    }
+                });
+
                 form.addEventListener("submit", function _submit_form(e) {
-                    console.log('!!!!!!!!');
                     e.preventDefault();
                     e.stopPropagation();
+                    list.classList.add('close');
                     form.removeEventListener("submit", _submit_form);
-                    resolve(input.value);
+                    resolve(input);
                 });
 
                 list.addEventListener("click", function _choose_item(e) {
                     e.preventDefault();
                     list.removeEventListener("click", _choose_item);
                     if (e.target instanceof HTMLLIElement) {
-                        resolve(e.target.textContent);
+                        let result = [];
+                        result.confidence = e.target.getAttribute("confidence");
+                        result.value = e.target.textContent;
+                        result.idx_suggestion = e.target.getAttribute("idx_suggestion");
+                        list.classList.add('close');
+                        input.value = e.target.textContent;
+                        input.size = input.value.length;
+                        list.style.width = `${input.offsetWidth}px`;
+
+                        resolve(result);
                     }
                 });
 
@@ -204,7 +237,16 @@
                     if (key === 13) {
                         list.removeEventListener("click", _choose_item);
                         if (e.target instanceof HTMLLIElement) {
-                            resolve(e.target.textContent);
+                            let result = [];
+                            result.confidence = e.target.getAttribute("confidence");
+                            result.value = e.target.textContent;
+                            result.idx_suggestion = e.target.getAttribute("idx_suggestion");
+                            list.classList.add('close');
+                            input.value = e.target.textContent;
+                            input.size = input.value.length;
+                            list.style.width = `${input.offsetWidth}px`;
+
+                            resolve(result);
                         }
                     }
                 });
@@ -234,6 +276,7 @@
             this.icon = document.createElement("button");
             this.icon.classList.add("stm-icon");
             this.icon.classList.add("stm-hidden");
+            this.icon.disabled = true;
             this.hasAnchor = false;
             this.input = document.getElementById(register.input);
             this.anchor = document.getElementById(register.anchor);
@@ -249,6 +292,7 @@
             this.anchor.style.overflow = "visible";
             this.anchor.append(this.icon);
             this.icon.classList.remove("stm-hidden");
+            this.icon.disabled = false;
         }
 
 
@@ -319,6 +363,7 @@
                 }, () => {
                     mediaRecorder.stop();
                     SpeakToMePopup.closeClicked = true;
+                    metrics.end_session();
                     SpeakToMePopup.hide();
                 }
 
@@ -327,9 +372,16 @@
                 document.getElementById("stm-levels").hidden = false;
                 visualize(analyzerNode);
 
+                metrics.start_attempt();
                 mediaRecorder.start();
+                metrics.start_recording();
+
+                const copy = document.getElementById("stm-content");
+                loadAnimation(SPINNING_ANIMATION, true);
+                copy.innerHTML = `<div id="stm-listening-text">Listening...</div>`
 
                 mediaRecorder.onstop = e => {
+                     metrics.stop_recording();
                     // handle clicking on close element by dumping recording data
                     if (SpeakToMePopup.closeClicked) {
                         SpeakToMePopup.closeClicked = false;
@@ -363,23 +415,32 @@
                         return;
                     }
 
+                    metrics.start_stt();
                     fetch(STT_SERVER_URL, {
                         method: "POST",
                         body: blob
                     })
                         .then(response => {
+                            if (!response.ok) {
+                                fail_gracefully(`Fetch error: ${response.statusText}`);
+                            }
+                            metrics.end_stt();
                             return response.json();
                         })
                         .then(json => {
                             console.log(
                                 `Got STT result: ${JSON.stringify(json)}`
                             );
-                            if (json.status === "ok") {
-                                display_options(json.data);
-                            }
+                            const container = document.getElementById("stm-box");
+                            container.classList.add('stm-done-animation');
+                            setTimeout(() => {
+                                if (json.status === "ok") {
+                                    display_options(json.data);
+                                }
+                            }, 500);
                         })
                         .catch(error => {
-                            console.error(`Fetch error: ${error}`);
+                            fail_gracefully(`Fetch error: ${error}`);
                         });
                 };
 
@@ -388,7 +449,7 @@
                 };
             })
             .catch(function(err) {
-                console.log(`Recording error: ${err}`);
+                fail_gracefully(`Fetch error: ${err}`);
             });
     };
 
@@ -397,9 +458,6 @@
        loadAnimation(START_ANIMATION, false, "stm-start-animation");
 
         setTimeout(() => {
-            const copy = document.getElementById("stm-content");
-            loadAnimation(SPINNING_ANIMATION, true);
-            copy.innerHTML = `<div id="stm-listening-text">Listening...</div>`
             stm_start();
         }, 1000);
     };
@@ -407,7 +465,9 @@
     // Click handler for stm icon
     const on_stm_icon_click = event => {
         event.preventDefault();
+        metrics.start_session();
         event.target.classList.add("stm-hidden");
+        event.target.disabled = true;
         SpeakToMePopup.showAt(event.clientX, event.clientY);
         stm_init();
     };
@@ -429,8 +489,11 @@
         const frequencyBins = new Float32Array(14);
 
         // Clear the canvas
+
+        var popupWidth = document.getElementById("stm-popup").offsetWidth;
+
         const levels = document.getElementById("stm-levels");
-        const xPos = levels.offsetWidth * .5;
+        const xPos = (popupWidth < levels.offsetWidth ? popupWidth * .5 - 22 : levels.offsetWidth * .5);
         const yPos = levels.offsetHeight * .5;
         const context = levels.getContext("2d");
         context.clearRect(0, 0, levels.width, levels.height);
@@ -450,16 +513,21 @@
         const dbRange = MAX_DB_LEVEL - MIN_DB_LEVEL;
 
         // Loop through the values and draw the bars
-        context.strokeStyle = "#000";
-        context.lineWidth = 10;
-        context.globalAlpha = .05
+        context.strokeStyle = "#d1d2d3";
+        
         for (let i = 0; i < n; i++) {
             const value = frequencyBins[i + skip];
-            const diameter = (levels.height * (value - MIN_DB_LEVEL) / dbRange) * .50;
+            const diameter = (levels.height * (value - MIN_DB_LEVEL) / dbRange) * 10;
             if (diameter < 0) {
                 continue;
             }
             // Display a bar for this value.
+            var alpha = diameter/500;
+            if(alpha > .2) alpha = .2;
+            else if (alpha < .1) alpha = .1;
+            
+            context.lineWidth = alpha*alpha*150;
+            context.globalAlpha = alpha*alpha*5;
             context.beginPath();
             context.ellipse(
                 xPos,
@@ -470,7 +538,7 @@
                 0,
                 2 * Math.PI
             );
-            context.stroke();
+            if(diameter > 90 && diameter < 360) context.stroke();
         }
         // Update the visualization the next time we can
         requestAnimationFrame(function() {
@@ -519,22 +587,28 @@
         // if the first result has a high enough confidence, just
         // use it directly.
         if (data[0].confidence > 0.9) {
-            metrics.attempt(data[0].confidence);
+            metrics.end_attempt(data[0].confidence, "default accepted", 0);
+            metrics.end_session();
             stm_icon.set_input(data[0].text);
             SpeakToMePopup.hide();
             return;
         }
 
-        SpeakToMePopup.choose_item(data).then(text => {
-            metrics.attempt(); // TODO: pass the confidence here
-            stm_icon.set_input(text);
+        metrics.set_options_displayed();
+        SpeakToMePopup.choose_item(data).then(input => {
+            metrics.end_attempt(input.confidence, "accepted", input.idx_suggestion);
+            metrics.end_session();
+            stm_icon.set_input(input.value);
             // Once a choice is made, close the popup.
             SpeakToMePopup.hide();
         }, id => {
             if (id === "stm-reset-button") {
+                metrics.end_attempt(-1, "reset", -1);
                 SpeakToMePopup.reset();
                 stm_init();
             } else {
+                metrics.end_attempt(-1, "rejected", -1);
+                metrics.end_session();
                 SpeakToMePopup.hide();
             }
         });
@@ -543,6 +617,15 @@
     const stm_icon = new SpeakToMeIcon();
     SpeakToMePopup.init();
 
+    const fail_gracefully = (errorMsg) => {
+        loadAnimation(ERROR_ANIMATION, false);
+        const copy = document.getElementById("stm-content");
+        copy.innerHTML = `<div id="stm-listening-text">Sorry, we encountered an error</div>`
+        setTimeout(() => {
+            SpeakToMePopup.hide();
+        }, 1500);
+        console.log('ERROR ERROR ERROR!!', errorMsg);
+    }
 
     // Webrtc_Vad integration
     SpeakToMeVad = function SpeakToMeVad() {
@@ -692,6 +775,8 @@
         this.goCloud = function(why) {
             console.log(why);
             this.stopGum();
+            const copy = document.getElementById("stm-content");
+            copy.innerHTML = `<div id="stm-listening-text">Processing...</div>`
             loadAnimation(DONE_ANIMATION, false);
         };
         console.log("speakToMeVad created()");
@@ -709,7 +794,7 @@ var Module = {
         };
     })(),
     printErr(text) {
-        console.error("[webrtc_vad.js error]", text);
+        fail_gracefully("[webrtc_vad.js error]", text);
     },
     canvas: (function() {})(),
     setStatus(text) {
