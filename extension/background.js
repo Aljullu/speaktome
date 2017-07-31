@@ -9,14 +9,14 @@ const analytics = new TestPilotGA({
   ds: 'addon',
   an: 'Voice Fill',
   aid: 'voicefill@mozilla.com',
-  av: '1.2.9'
+  av: '1.3.0'
 });
 
-browser.runtime.onMessage.addListener((event, content) => {
+browser.runtime.onMessage.addListener(event => {
     console.log('[metrics] Event successfully sent. Calling analytics');
 
     analytics
-    .sendEvent('voice fill', event, content)
+    .sendEvent('voice fill', event.type, event.content)
     .then(response => {
       console.log('[metrics] Event successfully sent', response);
     })
